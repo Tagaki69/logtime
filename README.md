@@ -1,6 +1,6 @@
 # 42 Dashboard Ultimate 🟢
 
-Extension **GNOME Shell** ultra-rapide pour suivre en temps réel ton **Logtime**, ton **Wallet**, tes **évaluations**, et voir si **tes amis sont présents au cluster**.
+Extension **GNOME Shell** ultra-rapide pour suivre en temps réel ton **Logtime**, ton **Wallet**, tes **évaluations**, ton **Burn Down Chart**, et voir si **tes amis sont présents au cluster**.
 
 ![Preview](preview.png)
 
@@ -25,53 +25,30 @@ git clone https://github.com/BalkamFR/logtime.git logtime@42 && cd logtime@42 &&
 
 ## 🔑 Configuration de l’API 42
 
-Pour que l’extension puisse récupérer tes données (Logtime, Wallet, Amis), tu dois créer une **application OAuth** sur l’Intra 42.
+Cette extension utilise deux méthodes de connexion pour contourner les limitations anti-triche de l'Intra 42.
 
 ---
 
-### Étape 1 : Créer l’application
+### ÉTAPE 1 : Configuration de l’API 42 (Logtime, Amis, Wallet)
+Tu dois créer une application OAuth sur l’Intra 42 pour obtenir tes accès.
+1. Rends-toi sur : 👉 https://profile.intra.42.fr/oauth/applications/new
+2. Remplis le formulaire comme suit :
+    - Name : Gnome Dashboard
+    - Redirect URI : http://localhost
+    - Scopes : Coche uniquement public
+3. Clique sur Submit.
+4. Copie l'UID et le SECRET qui s'affichent.
+5. Ouvre les Paramètres de l'extension (icône ⚙️ dans le menu de l'extension).
+6. Colle tes clés et renseigne ton login 42 (ex: votre_login).
 
-Rends-toi sur :  
-👉 https://profile.intra.42.fr/oauth/applications/new
 
-Remplis le formulaire :
-
-- **Name** : `Gnome Dashboard` (ou ce que tu veux)
-- **Redirect URI** : `http://localhost`  
-  _(obligatoire mais non utilisée)_
-- **Scopes** : `public`  
-  _(suffisant pour lire le profil et les locations)_
-
-Clique sur **Submit**.
-
----
-
-### Étape 2 : Récupérer les clés
-
-Une fois l’application créée, tu obtiendras :
-
-- **UID** → Client ID
-- **SECRET** → Client Secret
-
-Copie-les soigneusement.
-
----
-
-### Étape 3 : Entrer les clés dans l’extension
-
-1. Ouvre **Extensions GNOME** (icône 🧩)
-2. Trouve **42 Dashboard Ultimate**
-3. Clique sur **Paramètres (⚙️)**
-
-Dans la section **Identification 42** :
-
-- Colle ton **UID**
-- Colle ton **SECRET**
-- Entre ton **login 42** (ex: `papilaz`)
-
-Ferme la fenêtre.  
-👉 L’extension se rafraîchit automatiquement.
-
+### ÉTAPE 2 : Connexion par Cookie (Prochaines Défenses)
+L'API officielle restreint l'accès aux corrections futures pour les applications tierces. L'extension utilise donc un script Selenium pour récupérer ton cookie de session personnel.
+1. Ouvre le menu de l'extension dans ta barre supérieure.
+2. Dans la section des corrections, clique sur le bouton "🔑 Connexion (Cookie)".
+3. Une fenêtre de navigateur surgit : connecte-toi normalement à l'Intra.
+4. Une fois connecté, la fenêtre se ferme automatiquement et tes prochaines soutenances s'affichent !
+    - Note : Le cookie est stocké localement et dure environ 2 mois.
 ---
 
 ## 📅 Fonctionnalités
@@ -92,12 +69,16 @@ Ferme la fenêtre.
 ### 👥 Amis
 - Voir qui est **en ligne**
 - Voir sur **quel poste**
-- Logtime de la journée
+- Logtime
 - Accès rapide au profil Intra
 
 ### 📆 Calendrier partagé
 - Clique sur un ami
 - Consulte son **historique de logtime**
+
+### 🛡️ Prochaines Défenses
+- Alertes visuelles pour tes évaluations (Correcteur ou Corrigé).
+- Affiche le projet, la date et l'heure.
 
 ---
 
@@ -111,9 +92,9 @@ Ferme la fenêtre.
 
 ## 🔒 Sécurité & confidentialité
 
-- Aucune donnée stockée sur un serveur externe
-- Les tokens OAuth sont utilisés uniquement pour interroger l’API 42
-- Données conservées localement
+- 100% Local : Tes clés API, logins et cookies sont stockés uniquement sur ta machine.
+- Pas de Proxy : L'extension communique directement avec les serveurs de 42.
+- Open Source : Tu peux vérifier le script capture_cookies.py pour voir comment tes données sont traitées.
 
 ---
 
