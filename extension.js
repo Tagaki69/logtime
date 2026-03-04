@@ -257,7 +257,7 @@ class DashboardIndicator extends PanelMenu.Button {
         let lastDate = endOfMonth.getDate();
         let workableDaysCount = 0;
 
-        for (let d = todayDate; d <= lastDate; d++) {
+        for (let d = todayDate + 1; d <= lastDate; d++) {
             let tempDate = new Date(now.getFullYear(), now.getMonth(), d);
             let dayIndex = tempDate.getDay();
             let isWorkingDay = this._settings.get_boolean(`day-${dayIndex}`);
@@ -266,12 +266,7 @@ class DashboardIndicator extends PanelMenu.Button {
             }
         }
 
-        if (workableDaysCount === 0) {
-            this.targetDailyLbl.set_text("∞");
-            return;
-        }
-
-        let dailyAvg = remainingHours / workableDaysCount;
+        let dailyAvg = workableDaysCount > 0 ? (remainingHours / workableDaysCount) : remainingHours;
         let dh = Math.floor(dailyAvg);
         let dm = Math.floor((dailyAvg - dh) * 60);
 
