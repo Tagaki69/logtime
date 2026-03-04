@@ -266,14 +266,14 @@ class DashboardIndicator extends PanelMenu.Button {
             if (myStats.correction_point !== undefined) this.evalLbl.set_text(`${myStats.correction_point}`);
         }
 
-        await this._updateScales();
+        await this._updateScales(token, username);
 
         if (!this.calendarBox.visible) {
             await this._updateFriendsList(token);
         }
     }
 
-    async _updateScales() {
+    async _updateScales(token, username) {
         this.scalesBox.destroy_all_children();
 
         // 1. Vérification du cookie
