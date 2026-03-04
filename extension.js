@@ -4,6 +4,7 @@ const PanelMenu = imports.ui.panelMenu;
 const PopupMenu = imports.ui.popupMenu;
 const ExtensionUtils = imports.misc.extensionUtils;
 const Me = ExtensionUtils.getCurrentExtension();
+const ByteArray = imports.byteArray;
 
 let _httpSession;
 try {
@@ -28,13 +29,11 @@ class DashboardIndicator extends PanelMenu.Button {
         this._settings.connect('changed::gift-days', () => this._refresh()); 
         this._settings.connect('changed::username', () => this._refresh());
         
-        // Listener pour les jours de la semaine (day-0 à day-6)
         for(let i=0; i<7; i++) {
             this._settings.connect(`changed::day-${i}`, () => this._updateTimeLabel()); 
         }
 
         // --- TOP BAR (Panel) ---
-        // Le bouton Update n'est PLUS ici.
         let topBox = new St.BoxLayout({ y_align: Clutter.ActorAlign.CENTER, style_class: 'lgt-top-box' });
         
         this.onlineBadge = new St.Label({ text: "0", y_align: Clutter.ActorAlign.CENTER, style_class: 'lgt-online-badge' });
@@ -52,17 +51,27 @@ class DashboardIndicator extends PanelMenu.Button {
         this.timeDisplay = new St.Label({ text: "...", style_class: 'lgt-main-time', x_align: Clutter.ActorAlign.CENTER });
         this.menu.box.add_child(this.timeDisplay);
 
-        // STATS BOX
-        let statsBox = new St.BoxLayout({ vertical: false, style_class: 'lgt-stats-grid', x_expand: true });
-        this.walletLbl = this._createStatBox(statsBox, "Wallet", "-");
-        this.evalLbl = this._createStatBox(statsBox, "Eval", "-");
-        this.todayLbl = this._createStatBox(statsBox, "Aujourd'hui", "-");
-        this.targetDailyLbl = this._createStatBox(statsBox, "Cible/J", "-"); 
-        this.menu.box.add_child(statsBox);
+        // STATS BOX (Corrigé, plus de doublons)
+        this.statsBox = new St.BoxLayout({ vertical: false, style_class: 'lgt-stats-grid', x_expand: true });
+        this.walletLbl = this._createStatBox(this.statsBox, "Wallet", "-");
+        this.evalLbl = this._createStatBox(this.statsBox, "Eval", "-");
+        this.todayLbl = this._createStatBox(this.statsBox, "Aujourd'hui", "-");
+        this.targetDailyLbl = this._createStatBox(this.statsBox, "Cible/J", "-"); 
+        this.menu.box.add_child(this.statsBox);
+
+        // NOUVEAU : SCALES BOX
+        this.menu.box.add_child(new St.Label({ 
+            text: "PROCHAINES DÉFENSES", 
+            style_class: 'lgt-stat-label', 
+            style: 'margin-top: 10px; font-weight: bold; margin-bottom: 5px; text-align: center;' 
+        }));
+        
+        this.scalesBox = new St.BoxLayout({ vertical: true, style_class: 'lgt-stats-grid', x_expand: true });
+        this.menu.box.add_child(this.scalesBox);
 
         this.menu.box.add_child(new PopupMenu.PopupSeparatorMenuItem());
         
-        // --- ACTION ROW (C'est ici qu'on met les boutons du menu) ---
+        // --- ACTION ROW ---
         let actionRow = new St.BoxLayout({ vertical: false, style_class: 'lgt-action-row' });
         this.titleLbl = new St.Label({ text: "FRIENDS STATUS", style_class: 'lgt-title', x_expand: true, y_align: Clutter.ActorAlign.CENTER });
         actionRow.add_child(this.titleLbl);
@@ -72,7 +81,6 @@ class DashboardIndicator extends PanelMenu.Button {
         this.backBtn.connect('clicked', () => this._showFriendsView());
         actionRow.add_child(this.backBtn);
 
-        // === BOUTON UPDATE (DANS LE MENU) ===
         let updateBtn = new St.Button({ style_class: 'lgt-icon-btn warn', can_focus: true });
         updateBtn.set_child(new St.Icon({ icon_name: 'dialog-warning-symbolic.svg', icon_size: 18 }));
         updateBtn.connect('clicked', () => {
@@ -81,7 +89,6 @@ class DashboardIndicator extends PanelMenu.Button {
                 GLib.spawn_command_line_async(cmd);
                 Main.notify("Logtime", "Réinstallation via ~/goinfre lancée...");
                 
-                // Feedback sur le titre du menu
                 let oldText = this.titleLbl.text;
                 this.titleLbl.set_text("INSTALLING...");
                 GLib.timeout_add(GLib.PRIORITY_DEFAULT, 5000, () => {
@@ -93,21 +100,15 @@ class DashboardIndicator extends PanelMenu.Button {
             }
         });
         actionRow.add_child(updateBtn);
-        // ====================================
 
-        // === BOUTON MON PROFIL ===
         let myProfileBtn = new St.Button({ style_class: 'lgt-icon-btn', can_focus: true });
         myProfileBtn.set_child(new St.Icon({ icon_name: 'avatar-default-symbolic', icon_size: 18 })); 
         myProfileBtn.connect('clicked', () => {
             let user = this._settings.get_string('username');
-            if (user) {
-                Gio.AppInfo.launch_default_for_uri(`https://profile.intra.42.fr/users/${user}`, null);
-            } else {
-                Main.notify("Logtime", "Configure ton login d'abord !");
-            }
+            if (user) Gio.AppInfo.launch_default_for_uri(`https://profile.intra.42.fr/users/${user}`, null);
+            else Main.notify("Logtime", "Configure ton login d'abord !");
         });
         actionRow.add_child(myProfileBtn);
-        // =========================
 
         let calBtn = new St.Button({ style_class: 'lgt-icon-btn', can_focus: true });
         calBtn.set_child(new St.Icon({ icon_name: 'x-office-calendar-symbolic', icon_size: 18 }));
@@ -144,6 +145,46 @@ class DashboardIndicator extends PanelMenu.Button {
             this._refresh();
             return GLib.SOURCE_CONTINUE;
         });
+    }
+
+    async _getCookie() {
+        let cookiePath = GLib.get_home_dir() + '/.local/share/gnome-shell/extensions/logtime@42/.intra42_cookies.json';
+        let file = Gio.File.new_for_path(cookiePath);
+        
+        if (!file.query_exists(null)) return null;
+
+        try {
+            let [success, contents] = file.load_contents(null);
+            if (success && contents.length > 0) {
+                return ByteArray.toString(contents).trim();
+            }
+        } catch (e) {
+            return null;
+        }
+        return null;
+    }
+
+    _launchCookieCapture() {
+        if (this._isCapturing) return;
+        this._isCapturing = true;
+        
+        this.scalesBox.destroy_all_children();
+        this.scalesBox.add_child(new St.Label({ text: "⏳ Connexion en cours...", style_class: 'lgt-stat-value', x_align: Clutter.ActorAlign.CENTER }));
+
+        let scriptPath = GLib.get_home_dir() + '/.local/share/gnome-shell/extensions/logtime@42/capture_cookies.py';
+        
+        try {
+            let [success, pid] = GLib.spawn_async(null, ['python3', scriptPath], null, GLib.SpawnFlags.SEARCH_PATH | GLib.SpawnFlags.DO_NOT_REAP_CHILD, null);
+            if (success) {
+                GLib.child_watch_add(GLib.PRIORITY_DEFAULT, pid, (pid, status) => {
+                    GLib.spawn_close_pid(pid);
+                    this._isCapturing = false;
+                    this._refresh(); // On relance le rafraîchissement une fois le cookie récupéré
+                });
+            }
+        } catch (e) {
+            this._isCapturing = false;
+        }
     }
 
     _createStatBox(parent, title, value) {
@@ -225,9 +266,83 @@ class DashboardIndicator extends PanelMenu.Button {
             if (myStats.correction_point !== undefined) this.evalLbl.set_text(`${myStats.correction_point}`);
         }
 
+        await this._updateScales();
+
         if (!this.calendarBox.visible) {
             await this._updateFriendsList(token);
         }
+    }
+
+    async _updateScales() {
+        this.scalesBox.destroy_all_children();
+
+        // 1. Vérification du cookie
+        let cookie = await this._getCookie();
+        
+        // Si pas de cookie, on affiche le bouton
+        if (!cookie) {
+            let loginBtn = new St.Button({ style_class: 'lgt-icon-btn', x_align: Clutter.ActorAlign.CENTER, reactive: true, can_focus: true });
+            loginBtn.set_child(new St.Label({ text: "🔑 Connexion (Cookie)", style: 'font-weight: bold; padding: 4px;' }));
+            loginBtn.connect('clicked', () => this._launchCookieCapture());
+            this.scalesBox.add_child(loginBtn);
+            return;
+        }
+
+        // 2. Si on a le cookie, on tente la requête
+        // NOTE : On utilise ici l'API v2 pour l'exemple, mais elle rejettera probablement la requête 
+        // future=true car le token est de type Client Credentials, et elle ignorera le cookie.
+        let url = `https://api.intra.42.fr/v2/users/${username}/scale_teams?filter%5Bfuture%5D=true`;
+        
+        // Création d'une requête manuelle pour y injecter le Cookie EN PLUS du token API
+        let msg = Soup.Message.new('GET', url);
+        msg.request_headers.append('Authorization', `Bearer ${token}`);
+        msg.request_headers.append('Cookie', `_intra_42_session_production=${cookie}`);
+        
+        let response = await this._send_async(msg);
+        let scales = response ? JSON.parse(response) : null;
+
+        // Si l'API refuse ou que le cookie a expiré (erreur 401 simulée par null)
+        if (scales === null || scales.error) {
+            // On supprime le cookie expiré
+            let cookieFile = Gio.File.new_for_path(GLib.get_home_dir() + '/.local/share/gnome-shell/extensions/logtime@42/.intra42_cookies.json');
+            if (cookieFile.query_exists(null)) cookieFile.delete(null);
+            
+            let btn = new St.Button({ style_class: 'lgt-icon-btn', x_align: Clutter.ActorAlign.CENTER, reactive: true, can_focus: true });
+            btn.set_child(new St.Label({ text: "🔄 Cookie expiré - Reconnexion", style: 'color: #ff4757; font-weight: bold; padding: 4px;' }));
+            btn.connect('clicked', () => this._launchCookieCapture());
+            this.scalesBox.add_child(btn);
+            return;
+        }
+
+        if (!Array.isArray(scales) || scales.length === 0) {
+            this.scalesBox.add_child(new St.Label({ text: "Aucune défense prévue", style_class: 'lgt-stat-value', x_align: Clutter.ActorAlign.CENTER }));
+            return;
+        }
+
+        // Affichage des corrections
+        scales.slice(0, 3).forEach(scale => {
+            let date = new Date(scale.begin_at);
+            let hours = date.getHours().toString().padStart(2, '0');
+            let mins = date.getMinutes().toString().padStart(2, '0');
+            let day = date.getDate().toString().padStart(2, '0');
+            let month = (date.getMonth() + 1).toString().padStart(2, '0');
+            
+            let correctorLogin = scale.corrector ? scale.corrector.login : "Anonyme";
+            let isCorrector = (correctorLogin === username);
+            
+            let type = isCorrector ? "💪 Corriger" : "🎓 Être corrigé";
+            let color = isCorrector ? '#ff9f43' : '#54a0ff';
+            
+            let projectName = (scale.scale && scale.scale.name) ? scale.scale.name : "Projet";
+            if (scale.team && scale.team.name && projectName === "Projet") projectName = scale.team.name;
+            
+            let label = new St.Label({ 
+                text: `${day}/${month} à ${hours}h${mins}\n${type} (${projectName})`,
+                style_class: 'lgt-stat-label',
+                style: `color: ${color}; text-align: center; margin-bottom: 6px;`
+            });
+            this.scalesBox.add_child(label);
+        });
     }
 
     _updateTimeLabel() {
