@@ -213,10 +213,11 @@ class DashboardIndicator extends PanelMenu.Button {
         let bodyObj = { grant_type: 'client_credentials', client_id: uid, client_secret: secret };
         let bodyStr = JSON.stringify(bodyObj);
         
-        if (msg.set_request) msg.set_request('application/json', 2, bodyStr, bodyStr.length);
-        else {
-            msg.request_headers.append('Content-Type', 'application/json');
-            msg.set_body_data(GLib.Bytes.new(bodyStr));
+        if (msg.set_request) {
+            msg.set_request('application/json', 2, bodyStr, bodyStr.length);
+        } else {
+            let bytes = GLib.Bytes.new(ByteArray.fromString(bodyStr));
+            msg.set_request_body_from_bytes('application/json', bytes);
         }
         
         let response = await this._send_async(msg);
@@ -289,14 +290,17 @@ class DashboardIndicator extends PanelMenu.Button {
         }
 
         // 2. Si on a le cookie, on tente la requête
-        // NOTE : On utilise ici l'API v2 pour l'exemple, mais elle rejettera probablement la requête 
-        // future=true car le token est de type Client Credentials, et elle ignorera le cookie.
         let url = `https://api.intra.42.fr/v2/users/${username}/scale_teams?filter%5Bfuture%5D=true`;
         
         // Création d'une requête manuelle pour y injecter le Cookie EN PLUS du token API
         let msg = Soup.Message.new('GET', url);
-        msg.request_headers.append('Authorization', `Bearer ${token}`);
-        msg.request_headers.append('Cookie', `_intra_42_session_production=${cookie}`);
+        if (msg.request_headers) {
+            msg.request_headers.append('Authorization', `Bearer ${token}`);
+            msg.request_headers.append('Cookie', `_intra_42_session_production=${cookie}`);
+        } else {
+            msg.get_request_headers().append('Authorization', `Bearer ${token}`);
+            msg.get_request_headers().append('Cookie', `_intra_42_session_production=${cookie}`);
+        }
         
         let response = await this._send_async(msg);
         let scales = response ? JSON.parse(response) : null;
@@ -582,15 +586,31 @@ class DashboardIndicator extends PanelMenu.Button {
             return;
         }
         let msg = Soup.Message.new('GET', url);
-        _httpSession.queue_message(msg, (s, m) => {
-            if (m.status_code === 200) {
+        
+        if (_httpSession.queue_message) {
+            // Compatibilité Soup 2
+            _httpSession.queue_message(msg, (s, m) => {
+                if (m.status_code === 200) {
+                    try {
+                        GLib.file_set_contents(tmpPath, m.response_body.flatten().get_data());
+                        this._createRoundImage(tmpPath, tmpRoundPath);
+                        iconBin.set_child(new St.Icon({ gicon: new Gio.FileIcon({ file: roundFile }), icon_size: 54 }));
+                    } catch(e) {}
+                }
+            });
+        } else {
+            // Compatibilité Soup 3 (Ubuntu 22.04 / GNOME 42+)
+            _httpSession.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, null, (session, res) => {
                 try {
-                    GLib.file_set_contents(tmpPath, m.response_body.flatten().get_data());
-                    this._createRoundImage(tmpPath, tmpRoundPath);
-                    iconBin.set_child(new St.Icon({ gicon: new Gio.FileIcon({ file: roundFile }), icon_size: 54 }));
+                    let bytes = session.send_and_read_finish(res);
+                    if (msg.get_status() === 200) {
+                        GLib.file_set_contents(tmpPath, bytes.get_data());
+                        this._createRoundImage(tmpPath, tmpRoundPath);
+                        iconBin.set_child(new St.Icon({ gicon: new Gio.FileIcon({ file: roundFile }), icon_size: 54 }));
+                    }
                 } catch(e) {}
-            }
-        });
+            });
+        }
     }
     
     _createRoundImage(inputPath, outputPath) {
@@ -616,7 +636,12 @@ class DashboardIndicator extends PanelMenu.Button {
     _fetchJsonPromise(url, token) {
         return new Promise(resolve => {
             let msg = Soup.Message.new('GET', url);
-            msg.request_headers.append('Authorization', `Bearer ${token}`);
+            if (msg.request_headers) {
+                 msg.request_headers.append('Authorization', `Bearer ${token}`);
+            } else {
+                 msg.get_request_headers().append('Authorization', `Bearer ${token}`);
+            }
+            
             this._send_async(msg).then(data => {
                 try { resolve(JSON.parse(data)); } catch(e) { resolve(null); }
             });
@@ -626,8 +651,23 @@ class DashboardIndicator extends PanelMenu.Button {
     _send_async(msg) {
         return new Promise((resolve) => {
             if (_httpSession.queue_message) {
+                // Compatibilité Soup 2
                 _httpSession.queue_message(msg, (s, m) => resolve((m.response_body && m.response_body.data) ? m.response_body.data : null));
-            } else resolve(null);
+            } else {
+                // Compatibilité Soup 3 (Ubuntu 22.04 / GNOME 42+)
+                _httpSession.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, null, (session, res) => {
+                    try {
+                        let bytes = session.send_and_read_finish(res);
+                        if (bytes) {
+                            resolve(ByteArray.toString(bytes.get_data()));
+                        } else {
+                            resolve(null);
+                        }
+                    } catch (e) {
+                        resolve(null);
+                    }
+                });
+            }
         });
     }
     
