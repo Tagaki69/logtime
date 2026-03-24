@@ -1,4 +1,11 @@
-const { St, GLib, Clutter, Soup, GObject, Gio, GdkPixbuf } = imports.gi;
+const { St, GLib, Clutter, GObject, Gio, GdkPixbuf } = imports.gi;
+
+// Force l'utilisation de Soup 3.0 s'il est disponible (Standard sur GNOME 42 / Ubuntu 22.04)
+try {
+    imports.gi.versions.Soup = '3.0';
+} catch (e) {}
+const Soup = imports.gi.Soup;
+
 const Main = imports.ui.main;
 const PanelMenu = imports.ui.panelMenu;
 const PopupMenu = imports.ui.popupMenu;
@@ -7,11 +14,13 @@ const Me = ExtensionUtils.getCurrentExtension();
 const ByteArray = imports.byteArray;
 
 let _httpSession;
-try {
+if (Soup.MAJOR_VERSION === 2) {
     _httpSession = new Soup.SessionAsync();
-    _httpSession.user_agent = 'LogtimeExtension/19.0';
-    _httpSession.timeout = 10;
-} catch (e) {
+    try {
+        _httpSession.user_agent = 'LogtimeExtension/19.0';
+        _httpSession.timeout = 10;
+    } catch(e) {}
+} else {
     _httpSession = new Soup.Session();
 }
 
@@ -51,7 +60,7 @@ class DashboardIndicator extends PanelMenu.Button {
         this.timeDisplay = new St.Label({ text: "...", style_class: 'lgt-main-time', x_align: Clutter.ActorAlign.CENTER });
         this.menu.box.add_child(this.timeDisplay);
 
-        // STATS BOX (Corrigé, plus de doublons)
+        // STATS BOX
         this.statsBox = new St.BoxLayout({ vertical: false, style_class: 'lgt-stats-grid', x_expand: true });
         this.walletLbl = this._createStatBox(this.statsBox, "Wallet", "-");
         this.evalLbl = this._createStatBox(this.statsBox, "Eval", "-");
@@ -59,7 +68,7 @@ class DashboardIndicator extends PanelMenu.Button {
         this.targetDailyLbl = this._createStatBox(this.statsBox, "Cible/J", "-"); 
         this.menu.box.add_child(this.statsBox);
 
-        // NOUVEAU : SCALES BOX
+        // SCALES BOX
         this.menu.box.add_child(new St.Label({ 
             text: "PROCHAINES DÉFENSES", 
             style_class: 'lgt-stat-label', 
@@ -179,7 +188,7 @@ class DashboardIndicator extends PanelMenu.Button {
                 GLib.child_watch_add(GLib.PRIORITY_DEFAULT, pid, (pid, status) => {
                     GLib.spawn_close_pid(pid);
                     this._isCapturing = false;
-                    this._refresh(); // On relance le rafraîchissement une fois le cookie récupéré
+                    this._refresh(); 
                 });
             }
         } catch (e) {
@@ -277,10 +286,8 @@ class DashboardIndicator extends PanelMenu.Button {
     async _updateScales(token, username) {
         this.scalesBox.destroy_all_children();
 
-        // 1. Vérification du cookie
         let cookie = await this._getCookie();
         
-        // Si pas de cookie, on affiche le bouton
         if (!cookie) {
             let loginBtn = new St.Button({ style_class: 'lgt-icon-btn', x_align: Clutter.ActorAlign.CENTER, reactive: true, can_focus: true });
             loginBtn.set_child(new St.Label({ text: "🔑 Connexion (Cookie)", style: 'font-weight: bold; padding: 4px;' }));
@@ -289,10 +296,8 @@ class DashboardIndicator extends PanelMenu.Button {
             return;
         }
 
-        // 2. Si on a le cookie, on tente la requête
         let url = `https://api.intra.42.fr/v2/users/${username}/scale_teams?filter%5Bfuture%5D=true`;
         
-        // Création d'une requête manuelle pour y injecter le Cookie EN PLUS du token API
         let msg = Soup.Message.new('GET', url);
         if (msg.request_headers) {
             msg.request_headers.append('Authorization', `Bearer ${token}`);
@@ -305,9 +310,7 @@ class DashboardIndicator extends PanelMenu.Button {
         let response = await this._send_async(msg);
         let scales = response ? JSON.parse(response) : null;
 
-        // Si l'API refuse ou que le cookie a expiré (erreur 401 simulée par null)
         if (scales === null || scales.error) {
-            // On supprime le cookie expiré
             let cookieFile = Gio.File.new_for_path(GLib.get_home_dir() + '/.local/share/gnome-shell/extensions/logtime@42/.intra42_cookies.json');
             if (cookieFile.query_exists(null)) cookieFile.delete(null);
             
@@ -323,7 +326,6 @@ class DashboardIndicator extends PanelMenu.Button {
             return;
         }
 
-        // Affichage des corrections
         scales.slice(0, 3).forEach(scale => {
             let date = new Date(scale.begin_at);
             let hours = date.getHours().toString().padStart(2, '0');
@@ -588,7 +590,6 @@ class DashboardIndicator extends PanelMenu.Button {
         let msg = Soup.Message.new('GET', url);
         
         if (_httpSession.queue_message) {
-            // Compatibilité Soup 2
             _httpSession.queue_message(msg, (s, m) => {
                 if (m.status_code === 200) {
                     try {
@@ -599,7 +600,6 @@ class DashboardIndicator extends PanelMenu.Button {
                 }
             });
         } else {
-            // Compatibilité Soup 3 (Ubuntu 22.04 / GNOME 42+)
             _httpSession.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, null, (session, res) => {
                 try {
                     let bytes = session.send_and_read_finish(res);
@@ -651,10 +651,8 @@ class DashboardIndicator extends PanelMenu.Button {
     _send_async(msg) {
         return new Promise((resolve) => {
             if (_httpSession.queue_message) {
-                // Compatibilité Soup 2
                 _httpSession.queue_message(msg, (s, m) => resolve((m.response_body && m.response_body.data) ? m.response_body.data : null));
             } else {
-                // Compatibilité Soup 3 (Ubuntu 22.04 / GNOME 42+)
                 _httpSession.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, null, (session, res) => {
                     try {
                         let bytes = session.send_and_read_finish(res);
@@ -678,8 +676,22 @@ class DashboardIndicator extends PanelMenu.Button {
 });
 
 let _indicator;
-function init() { return new Extension(); }
-class Extension {
-    enable() { _indicator = new DashboardIndicator(); Main.panel.addToStatusArea('logtime-indicator', _indicator); }
-    disable() { if (_indicator) { _indicator.destroy(); _indicator = null; } }
+
+// Structure OBLIGATOIRE pour GNOME 42 (au lieu de return new Extension())
+function init() {
+    // Aucune initialisation complexe ici pour GNOME 42
+}
+
+function enable() {
+    if (!_indicator) {
+        _indicator = new DashboardIndicator();
+        Main.panel.addToStatusArea('logtime-indicator', _indicator);
+    }
+}
+
+function disable() {
+    if (_indicator) {
+        _indicator.destroy();
+        _indicator = null;
+    }
 }
