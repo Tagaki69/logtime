@@ -1,9 +1,4 @@
 const { St, GLib, Clutter, GObject, Gio, GdkPixbuf } = imports.gi;
-
-// Force l'utilisation de Soup 3.0 s'il est disponible (Standard sur GNOME 42 / Ubuntu 22.04)
-try {
-    imports.gi.versions.Soup = '3.0';
-} catch (e) {}
 const Soup = imports.gi.Soup;
 
 const Main = imports.ui.main;
@@ -14,6 +9,7 @@ const Me = ExtensionUtils.getCurrentExtension();
 const ByteArray = imports.byteArray;
 
 let _httpSession;
+// Détection de la version de Soup chargée par GNOME pour éviter les conflits
 if (Soup.MAJOR_VERSION === 2) {
     _httpSession = new Soup.SessionAsync();
     try {
@@ -677,9 +673,8 @@ class DashboardIndicator extends PanelMenu.Button {
 
 let _indicator;
 
-// Structure OBLIGATOIRE pour GNOME 42 (au lieu de return new Extension())
 function init() {
-    // Aucune initialisation complexe ici pour GNOME 42
+    // Structure OBLIGATOIRE pour GNOME 42
 }
 
 function enable() {
