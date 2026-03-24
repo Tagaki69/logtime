@@ -8,16 +8,28 @@ chrome.runtime.onInstalled.addListener(() => {
   console.log("Extension Logtime installée. Alarme créée.");
 });
 
+// Restaurer le badge au démarrage du navigateur
+chrome.storage.local.get(['cachedFriends'], (data) => {
+  if (data.cachedFriends) {
+    let count = 0;
+    Object.values(data.cachedFriends).forEach(f => { if (f.active) count++; });
+    chrome.action.setBadgeText({ text: count.toString() });
+    chrome.action.setBadgeBackgroundColor({ color: count > 0 ? '#00b894' : '#636e72' });
+  }
+});
+
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === "refreshData") {
     await refreshAllData();
   }
 });
 
-// Listener pour que le popup puisse demander un rafraîchissement manuel
+// Listener pour que le popup/options puisse demander un rafraîchissement manuel
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "refresh") {
-    refreshAllData().then(() => sendResponse({status: "success"}));
+    refreshAllData().then(success => {
+      sendResponse({ status: success ? "success" : "error" });
+    });
     return true; // async response
   }
   if (request.action === "getToken") {
@@ -52,6 +64,8 @@ async function getValidToken() {
       token = data.access_token;
       tokenExpire = (Date.now() / 1000) + data.expires_in - 60; // 1 min margin
       return token;
+    } else {
+      console.error("Token API Error:", data);
     }
   } catch (error) {
     console.error("Erreur de récupération du token:", error);
@@ -61,11 +75,11 @@ async function getValidToken() {
 
 async function refreshAllData() {
   const currentToken = await getValidToken();
-  if (!currentToken) return;
+  if (!currentToken) return false;
 
   const settings = await chrome.storage.local.get(['username', 'friendsList']);
   const username = settings.username;
-  if (!username) return;
+  if (!username) return false;
 
   const now = new Date();
   const startObj = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -99,11 +113,34 @@ async function refreshAllData() {
           const friendLocsRes = await fetch(`https://api.intra.42.fr/v2/users/${friend}/locations?range[begin_at]=${start},${end}&per_page=100`, {
             headers: { 'Authorization': `Bearer ${currentToken}` }
           });
+          if (!friendLocsRes.ok) {
+            console.warn(`Could not fetch locs for ${friend}`);
+            continue;
+          }
           const friendLocs = await friendLocsRes.json();
           const activeSession = Array.isArray(friendLocs) && friendLocs.find(l => l.end_at === null);
-          friendsStats[friend] = { active: activeSession ? activeSession.host : null, locs: friendLocs };
+          
+          // Récupération du profil de l'ami (pour la photo)
+          let avatarUrl = null;
+          try {
+            const friendProfileRes = await fetch(`https://api.intra.42.fr/v2/users/${friend}`, {
+              headers: { 'Authorization': `Bearer ${currentToken}` }
+            });
+            const friendProfile = await friendProfileRes.json();
+            if (friendProfile && friendProfile.image && friendProfile.image.versions && friendProfile.image.versions.small) {
+              avatarUrl = friendProfile.image.versions.small;
+            } else if (friendProfile && friendProfile.image && friendProfile.image.link) {
+              avatarUrl = friendProfile.image.link;
+            }
+          } catch(e) { console.warn("Error fetching friend profile info", friend); }
+
+          friendsStats[friend] = { 
+            active: activeSession ? activeSession.host : null, 
+            locs: friendLocs,
+            avatar: avatarUrl 
+          };
           if (activeSession) onlineFriends++;
-        } catch(e) { console.error("Error friend", friend); }
+        } catch(e) { console.warn("Error API friend", friend); }
       }
     }
 
@@ -112,18 +149,22 @@ async function refreshAllData() {
       chrome.action.setBadgeText({ text: onlineFriends.toString() });
       chrome.action.setBadgeBackgroundColor({ color: '#00b894' });
     } else {
-      chrome.action.setBadgeText({ text: '' });
+      chrome.action.setBadgeText({ text: '0' });
+      chrome.action.setBadgeBackgroundColor({ color: '#636e72' });
     }
 
     // Cache everything
     await chrome.storage.local.set({
       cachedLocations: Array.isArray(locs) ? locs : [],
-      cachedStats: stats,
+      cachedStats: stats && !stats.error ? stats : null,
       cachedFriends: friendsStats,
       lastRefresh: Date.now()
     });
 
+    return true;
+
   } catch (err) {
     console.error("Erreur lors du refresh:", err);
+    return false;
   }
 }

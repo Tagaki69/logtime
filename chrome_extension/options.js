@@ -75,12 +75,22 @@ function saveOptions() {
 
   chrome.storage.local.set(settings, () => {
     const status = document.getElementById('statusMessage');
-    status.textContent = 'Paramètres sauvegardés !';
+    status.textContent = 'Sauvegarde & Récupération des données...';
     status.classList.add('show');
     
-    setTimeout(() => {
-      status.classList.remove('show');
-    }, 2000);
+    // Trigger un refresh en background pour vérifier que ça marche
+    chrome.runtime.sendMessage({action: "refresh"}, (response) => {
+      if (response && response.status === "error") {
+        status.textContent = 'Erreur API: Vérifie ton UID/Secret.';
+        status.style.color = '#d63031';
+      } else {
+        status.textContent = 'Paramètres validés et données chargées !';
+        status.style.color = '#00b894';
+      }
+      setTimeout(() => {
+        status.classList.remove('show');
+      }, 3000);
+    });
   });
 }
 

@@ -50,6 +50,26 @@ async function loadData() {
     return;
   }
 
+  // Si on a pas encore de stats en cache, on force un refresh silencieux
+  if (!data.cachedStats) {
+    document.getElementById("mainTime").textContent = "Chargement...";
+    chrome.runtime.sendMessage({action: "refresh"}, async (res) => {
+        if (res && res.status === "success") {
+           const newData = await chrome.storage.local.get(['cachedLocations', 'cachedStats', 'cachedFriends', 'giftDays', 'days']);
+           Object.assign(data, newData);
+           renderEverything(data);
+        } else {
+           document.getElementById("mainTime").textContent = "Erreur API";
+           document.getElementById("ratioTime").textContent = "Vérifie les clés: Options ⚙️";
+        }
+    });
+    return; // renderEverything handled via callback
+  }
+
+  renderEverything(data);
+}
+
+function renderEverything(data) {
   // --- STATS ---
   if (data.cachedStats) {
     document.getElementById("wallet").textContent = data.cachedStats.wallet !== undefined ? `${data.cachedStats.wallet}₳` : "-";
@@ -214,10 +234,12 @@ function renderFriends(friendsStats) {
 
     const av = document.createElement("div");
     av.className = "friend-avatar";
-    av.textContent = login.substring(0,2).toUpperCase();
+    if (f.avatar) {
+      av.innerHTML = `<img src="${f.avatar}" alt="${login}">`;
+    } else {
+      av.textContent = login.substring(0,2).toUpperCase();
+    }
     
-    // Si on avait fetch l'avatar en cache, on pourrait l'afficher ici. L'API locale permet juste d'afficher le login pour l'instant. (Pour économiser 1 req par ami)
-
     const info = document.createElement("div");
     info.className = "friend-info";
     info.innerHTML = `<span class="friend-name">${login}</span><span class="friend-logtime">${fh}h ${fm}m</span>`;
